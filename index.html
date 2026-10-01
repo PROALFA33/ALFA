@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>ALFA</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#05080f;--ink:#dbe9ff;--dim:#7f95b6;--eye:#8aa0bf;--panel:#0c1422;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){--bg:#eef4ff;--ink:#0b1b33;--dim:#4d6486;--panel:#fff}}
+:root[data-theme="dark"]{--bg:#05080f;--ink:#dbe9ff;--dim:#7f95b6;--panel:#0c1422}
+body.on{--eye:#22c55e}body.s-hear{--eye:#ffc700}body.s-speak{--eye:#2f8bff}body.s-error{--eye:#ff3b3b}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Rajdhani","Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding:16px;gap:10px}
+#av{position:relative;width:min(55vw,260px);aspect-ratio:1;margin-top:2vh;transition:width .3s}
+body.mini #av{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));width:92px;margin:0;z-index:9}
+body.mini #panel{display:none}
+#chip{display:none;position:fixed;right:116px;bottom:calc(34px + env(safe-area-inset-bottom,0px));background:var(--panel);border:1px solid var(--eye);border-radius:14px;padding:6px 10px;font-size:1rem;z-index:9;text-align:right}
+body.mini #chip{display:block}
+#ring{position:absolute;inset:0;border-radius:50%;border:4px solid var(--eye);border-top-color:transparent;border-bottom-color:transparent;box-shadow:0 0 20px var(--eye);animation:spin 6s linear infinite}
+body.on #ring{animation-duration:2.5s}
+@keyframes spin{to{transform:rotate(360deg)}}
+#face{position:absolute;inset:14%;border-radius:50%;background:var(--panel)}
+.eye{position:absolute;top:32%;width:20%;height:26%;border-radius:50%;background:var(--eye);box-shadow:0 0 14px var(--eye);animation:blink 5s infinite}
+#eL{left:22%}#eR{right:22%}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.08)}}
+#wave{position:absolute;left:24%;top:72%;width:52%;height:14%}
+#mic{position:absolute;left:-6px;bottom:-6px;width:40px;height:40px;padding:0;border-radius:50%;background:var(--panel);color:var(--ink);border:2px solid var(--eye);font-size:18px}
+body.mini #mic{width:34px;height:34px;font-size:15px}
+#panel{width:100%;max-width:560px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
+#wx{text-align:center;color:var(--dim);min-height:1.3em}
+#status{font-size:1.4rem;text-align:center;min-height:1.6em}
+#log{flex:1;min-height:60px;overflow-y:auto;color:var(--dim);font-size:1.05rem;border:1px solid var(--panel);border-radius:10px;padding:8px}
+#log a{color:var(--ink);display:block}
+.bar{display:flex;gap:8px}
+input{flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--dim);border-radius:10px;padding:12px;font:inherit;font-size:1.05rem}
+button{font:inherit;font-weight:700;font-size:1.05rem;border-radius:10px;border:0;padding:12px 14px;background:var(--dim);color:var(--bg)}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+details{color:var(--dim)}details input{width:100%;margin:6px 0}
+@media (prefers-reduced-motion:reduce){#ring,.eye{animation:none}}
+</style>
+</head>
+<body>
+<div id="av"><div id="ring"></div><div id="face"><div class="eye" id="eL"></div><div class="eye" id="eR"></div><canvas id="wave" width="300" height="60"></canvas></div><button id="mic" aria-label="Mikrofon aç/kapat">🎤</button></div>
+<div id="chip"></div>
+<div id="panel">
+<div id="wx"></div>
+<div id="status">Mikrofon kapalı</div>
+<div id="log">Mikrofona dokun ve "Alfa, YouTube aç" de. "Alfa, hava durumu" da dene.</div>
+<div class="bar"><input id="cmd" placeholder="Komut yaz" autocomplete="off" aria-label="Komut"><button id="send">Gönder</button><button id="min">Köşeye</button></div>
+<details><summary>Ayarlar</summary><input id="key" type="password" placeholder="Ücretsiz Gemini API anahtarı" aria-label="API anahtarı"><input id="model" placeholder="Model (boşsa gemini-2.5-flash)" aria-label="Model"><input id="city" placeholder="Şehir (hava durumu için)" aria-label="Şehir"><button id="save">Kaydet</button></details>
+</div>
+<script>
+const $=id=>document.getElementById(id),B=document.body;
+const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
+const P=NATIVE?Capacitor.registerPlugin("SpeechRecognition"):null;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let micOn=false,speaking=false,rec=null,t=0,timer=null,wxText="";
+function setState(k,ms){B.classList.remove("s-think","s-speak","s-error","s-hear");if(k)B.classList.add("s-"+k);clearTimeout(timer);if(ms)timer=setTimeout(()=>setState(null),ms)}
+function log(m,dim){const d=document.createElement("div");d.textContent=m;d.style.margin="4px 0";if(!dim)d.style.color="var(--ink)";$("log").append(d);$("log").scrollTop=1e9}
+function status(s){$("status").textContent=s}
+function fail(s,d){setState("error",3500);status(s);if(d)log(d,1)}
+async function open_(url){
+  try{if(NATIVE){await Capacitor.registerPlugin("AppLauncher").openUrl({url});return}}catch(e){}
+  const w=window.open(url,"_blank","noopener");
+  if(!w){const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener";a.textContent="Aç: "+url;$("log").append(a)}
+}
+function say(text){
+  log("ALFA: "+text);status(text.slice(0,80));setState("speak");speaking=true;
+  const done=()=>{speaking=false;setState(null)};
+  if(!("speechSynthesis" in window)){setTimeout(done,1500);return}
+  try{const u=new SpeechSynthesisUtterance(text.slice(0,400));u.lang="tr-TR";u.onend=u.onerror=done;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){done()}
+}
+async function ai(q){
+  const k=localStorage.getItem("key"),m=localStorage.getItem("model")||"gemini-2.5-flash";
+  if(!k){fail("API anahtarı yok","Ayarlar bölümüne ücretsiz Gemini anahtarını gir.");return}
+  try{
+    const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(m)+":generateContent",{method:"POST",headers:{"content-type":"application/json","x-goog-api-key":k},
+      body:JSON.stringify({systemInstruction:{parts:[{text:"Sen ALFA adlı sesli asistansın. Türkçe, en fazla iki kısa cümleyle cevap ver."}]},contents:[{role:"user",parts:[{text:q}]}]})});
+    const d=await r.json();if(!r.ok)throw new Error((d.error&&d.error.message)||r.status);
+    say(d.candidates[0].content.parts.map(x=>x.text||"").join("").trim());
+  }catch(e){fail("Yapay zeka hatası",e.message)}
+}
+const wc=c=>c===0?"açık":c<4?"parçalı bulutlu":c<50?"sisli":c<70?"yağmurlu":c<80?"karlı":c<90?"sağanak":"fırtınalı";
+async function weather(cityIn,speak){
+  const city=(cityIn||localStorage.getItem("city")||"").trim();
+  if(!city){fail("Şehir yok","Ayarlar bölümüne şehir gir.");return}
+  if(!navigator.onLine){fail("İnternet yok");return}
+  try{
+    const g=await(await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name="+encodeURIComponent(city))).json();
+    const p=g.results&&g.results[0];if(!p){fail("Şehir bulunamadı");return}
+    const w=await(await fetch("https://api.open-meteo.com/v1/forecast?latitude="+p.latitude+"&longitude="+p.longitude+"&current=temperature_2m,weather_code")).json();
+    const txt=Math.round(w.current.temperature_2m)+"°C, "+wc(w.current.weather_code);
+    wxText=p.name+" "+txt;chip();
+    if(speak)say(p.name+" için "+txt);
+  }catch(e){fail("Hava durumu alınamadı")}
+}
+function chip(){
+  const h=new Date().toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
+  $("chip").textContent=h+(wxText?" · "+wxText:"");$("wx").textContent=wxText;
+}
+async function run(raw){
+  const c=raw.toLowerCase().trim();if(!c)return;
+  log("› "+c,1);setState("think");status("Düşünüyorum");
+  await sleep(400);
+  if(/youtube/.test(c)){say("Açılıyor");open_("https://www.youtube.com")}
+  else if(/hava/.test(c))weather(c.replace(/hava( durumu)?|nasıl|bugün|kaç derece/g,""),true);
+  else if(/google|(^|\s)ara(\s|$)/.test(c)){
+    if(!navigator.onLine){fail("İnternet yok");return}
+    const q=c.replace(/google'?(da|dan)?|\bara(ma)?\b|\byap\b/g,"").trim();
+    say("Aranıyor");open_("https://www.google.com/search?q="+encodeURIComponent(q));
+  }
+  else if(/saat/.test(c))say(new Date().toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"}));
+  else if(/mikrofon.*kapat/.test(c)){say("Anlaşıldı");setMic(false)}
+  else ai(raw);
+}
+function handle(text){
+  const m=text.toLowerCase().match(/\b(alfa|alpha)\b[ ,.]*(.*)/);
+  if(!m)return;
+  const cmd=m[2].replace(/[.,!?]+$/,"").trim();
+  if(!cmd){setState("hear",2500);status("Duyamadım");return}
+  run(cmd);
+}
+function setMic(on){
+  micOn=on;B.classList.toggle("on",on);
+  if(!on){status("Mikrofon kapalı");if(NATIVE){P.stop().catch(()=>{})}else{try{rec&&rec.stop()}catch(e){}rec=null}return}
+  status("Dinliyorum");NATIVE?nativeLoop():webRec();
+}
+async function nativeLoop(){
+  try{
+    const perm=await P.requestPermissions();
+    if(perm.speechRecognition!=="granted"){micOn=false;B.classList.remove("on");fail("Mikrofon izni yok","Android Ayarlar > Uygulamalar > ALFA > İzinler > Mikrofon.");return}
+  }catch(e){micOn=false;B.classList.remove("on");fail("Ses tanıma kullanılamıyor",e.message||"");return}
+  while(micOn){
+    if(speaking){await sleep(300);continue}
+    try{
+      const r=await P.start({language:"tr-TR",maxResults:1,partialResults:false,popup:false});
+      if(r&&r.matches&&r.matches[0])handle(r.matches[0]);
+    }catch(e){await sleep(700)}
+  }
+}
+function webRec(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){setMic(false);fail("Ses tanıma desteklenmiyor");return}
+  rec=new SR();rec.lang="tr-TR";rec.continuous=true;
+  rec.onresult=e=>{const r=e.results[e.results.length-1];if(r.isFinal&&!speaking)handle(r[0].transcript)};
+  rec.onerror=e=>{if(e.error==="not-allowed"){micOn=false;B.classList.remove("on");fail("Mikrofon izni yok")}};
+  rec.onend=()=>{if(micOn){try{rec.start()}catch(e){}}};
+  try{rec.start()}catch(e){}
+}
+$("mic").onclick=e=>{e.stopPropagation();setMic(!micOn)};
+$("send").onclick=()=>{run($("cmd").value);$("cmd").value=""};
+$("cmd").onkeydown=e=>{if(e.key==="Enter")$("send").click()};
+$("min").onclick=()=>B.classList.add("mini");
+$("av").onclick=()=>B.classList.remove("mini");
+$("key").value=localStorage.getItem("key")||"";$("city").value=localStorage.getItem("city")||"";$("model").value=localStorage.getItem("model")||"";
+$("save").onclick=()=>{localStorage.setItem("key",$("key").value.trim());localStorage.setItem("city",$("city").value.trim());localStorage.setItem("model",$("model").value.trim());log("Ayarlar kaydedildi",1);weather("",false)};
+chip();setInterval(chip,20000);if(localStorage.getItem("city"))weather("",false);
+const cv=$("wave"),cx=cv.getContext("2d");
+function draw(){
+  t+=.15;
+  if(B.classList.contains("s-think"))B.style.setProperty("--eye","hsl("+((t*60)%360)+" 100% 55%)");else B.style.removeProperty("--eye");
+  const amp=speaking?16:micOn?6:2;
+  cx.clearRect(0,0,300,60);cx.beginPath();cx.lineWidth=4;cx.strokeStyle=getComputedStyle(B).getPropertyValue("--eye").trim()||"#8aa0bf";
+  for(let x=0;x<=300;x+=4){const y=30+Math.sin(x*.05+t)*amp*Math.sin(x/300*Math.PI);x?cx.lineTo(x,y):cx.moveTo(x,y)}
+  cx.stroke();requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
